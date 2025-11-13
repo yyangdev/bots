@@ -1,17 +1,45 @@
 services:
-  - type: web
+  # 1. Сервис для Redis. Он нужен для хранения состояний FSM (админ-панель).
+  - type: redis
+    name: bot-redis
+    plan: free # Бесплатный тарифный план Render
+    ipAllowList: [] # Разрешает внутренние подключения от нашего бота
+    maxmemoryPolicy: allkeys-lru # Стратегия удаления старых данных при нехватке памяти
+
+  # 2. Наш бот. Он работает как "Background Worker", то есть постоянно запущенный процесс.
+  - type: worker
     name: telegram-shop-bot
     env: python
-    plan: free
-    branch: main
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: python main.py
+    plan: free # Бесплатный тарифный план Render
+    # Команда, которая выполняется один раз при создании или обновлении сервиса
+    buildCommand: "pip install -r requirements.txt"
+    # Команда, которая запускает вашего бота
+    startCommand: "python bot.py"
+    # Автоматическое обновление бота при изменениях в GitHub репозитории
+    autoDeploy: yes
+    # Создаем и подключаем постоянный диск для хранения файла базы данных SQLite
+    disks:
+      - name: sqlite-data
+        mountPath: /var/data # Путь, по которому диск будет доступен внутри сервиса
+        sizeGB: 1 # 1 ГБ более чем достаточно
+    # Переменные окружения, которые будут доступны в вашем python-скрипте
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11 # Рекомендуемая версия Python
+      - key: DATA_DIR
+        value: /var/data # Указываем скрипту, где хранить БД (на нашем диске)
+      - key: REDIS_URL
+        fromService: # Автоматически получаем URL для подключения к нашему Redis
+          type: redis
+          name: bot-redis
+          property: connectionString
+      # --- Секретные переменные ---
+      # Их значения мы введем вручную в панели Render
       - key: BOT_TOKEN
-        value: "8366606577:AAFHCashI_usjf1Xowif_flbF7bWaXWerVU"
+        sync: false
       - key: ADMIN_USERNAMES
-        value: "yesbeers,yyangpython"
+        sync: false
       - key: MANAGER_CONTACT
-        value: "@managersrich"
+        sync: false
       - key: REQUIRED_CHANNEL
-        value: "@eweton"
+        sync: false

@@ -1,40 +1,41 @@
 services:
-  # 1. Сервис для Redis. Он нужен для хранения состояний FSM (админ-панель).
+  # 1. Сервис Redis для FSM (остается без изменений)
   - type: redis
     name: bot-redis
-    plan: free # Бесплатный тарифный план Render
-    ipAllowList: [] # Разрешает внутренние подключения от нашего бота
-    maxmemoryPolicy: allkeys-lru # Стратегия удаления старых данных при нехватке памяти
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
 
-  # 2. Наш бот. Он работает как "Background Worker", то есть постоянно запущенный процесс.
+  # 2. НОВЫЙ сервис: База данных PostgreSQL
+  - type: psql
+    name: bot-database
+    plan: free
+    postgresMajorVersion: 14 # Версия PostgreSQL
+
+  # 3. Наш бот-воркер (изменен)
   - type: worker
     name: telegram-shop-bot
     env: python
-    plan: free # Бесплатный тарифный план Render
-    # Команда, которая выполняется один раз при создании или обновлении сервиса
+    plan: free
     buildCommand: "pip install -r requirements.txt"
-    # Команда, которая запускает вашего бота
     startCommand: "python bot.py"
-    # Автоматическое обновление бота при изменениях в GitHub репозитории
     autoDeploy: yes
-    # Создаем и подключаем постоянный диск для хранения файла базы данных SQLite
-    disks:
-      - name: sqlite-data
-        mountPath: /var/data # Путь, по которому диск будет доступен внутри сервиса
-        sizeGB: 1 # 1 ГБ более чем достаточно
-    # Переменные окружения, которые будут доступны в вашем python-скрипте
+    # УДАЛЕНА секция disks
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11 # Рекомендуемая версия Python
-      - key: DATA_DIR
-        value: /var/data # Указываем скрипту, где хранить БД (на нашем диске)
+        value: 3.11
       - key: REDIS_URL
-        fromService: # Автоматически получаем URL для подключения к нашему Redis
+        fromService:
           type: redis
           name: bot-redis
           property: connectionString
-      # --- Секретные переменные ---
-      # Их значения мы введем вручную в панели Render
+      # НОВАЯ переменная для подключения к PostgreSQL
+      - key: DATABASE_URL
+        fromService:
+          type: psql
+          name: bot-database
+          property: connectionString
+      # Секретные переменные остаются без изменений
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_USERNAMES

@@ -1,20 +1,18 @@
 services:
-  # 1. Сервис Redis для FSM (без изменений)
+  # 1. Сервис Redis для FSM.
   - type: redis
     name: bot-redis
     plan: free
     ipAllowList: []
     maxmemoryPolicy: allkeys-lru
 
-  # 2. База данных PostgreSQL (ИЗМЕНЕНО)
-  - type: database # <-- ВОТ ИСПРАВЛЕНИЕ: было "psql", стало "database"
+  # 2. База данных PostgreSQL. ПРАВИЛЬНЫЙ ТИП - "psql".
+  - type: psql
     name: bot-database
     plan: free
-    # Указываем, что это PostgreSQL. Render также поддерживает MySQL и т.д.
-    databaseName: botdb # Имя самой базы данных внутри сервера
-    user: botuser # Имя пользователя
+    postgresMajorVersion: 14
 
-  # 3. Наш бот-воркер (ИЗМЕНЕНО)
+  # 3. Наш бот-воркер.
   - type: worker
     name: telegram-shop-bot
     env: python
@@ -30,13 +28,13 @@ services:
           type: redis
           name: bot-redis
           property: connectionString
-      # Подключение к PostgreSQL (ИЗМЕНЕНО)
+      # Подключение к PostgreSQL. ПРАВИЛЬНЫЙ ТИП - "psql".
       - key: DATABASE_URL
         fromService:
-          type: database # <-- ИСПРАВЛЕНИЕ: здесь тоже было "psql"
+          type: psql
           name: bot-database
           property: connectionString
-      # Секретные переменные (без изменений)
+      # Секретные переменные (без изменений).
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_USERNAMES

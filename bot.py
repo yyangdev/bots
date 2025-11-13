@@ -22,22 +22,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация
-TOKEN = "8366606577:AAFHCashI_usjf1Xowif_flbF7bWaXWerVU"
-ADMIN_USERNAMES = ["yesbeers", "yyangpython"]
-MANAGER_CONTACT = "@managersrich"
-REQUIRED_CHANNEL = "@eweton"
+# Конфигурация из переменных окружения
+TOKEN = os.getenv('BOT_TOKEN', '8366606577:AAFHCashI_usjf1Xowif_flbF7bWaXWerVU')
+ADMIN_USERNAMES = os.getenv('ADMIN_USERNAMES', 'yesbeers,yyangpython').split(',')
+MANAGER_CONTACT = os.getenv('MANAGER_CONTACT', '@managersrich')
+REQUIRED_CHANNEL = os.getenv('REQUIRED_CHANNEL', '@eweton')
 REFERRAL_BONUS = 0.2
 
-# Абсолютный путь к базе данных
-SCRIPT_DIR = Path(__file__).parent.absolute()
-DATABASE_PATH = SCRIPT_DIR / "shop_bot.db"
+# Путь к базе данных (для Render)
+DATABASE_PATH = Path("shop_bot.db")
 
-logger.info(f"Путь к базе данных: {DATABASE_PATH}")
+logger.info(f"Бот запускается...")
+logger.info(f"Токен: {TOKEN[:10]}...")
+logger.info(f"Админы: {ADMIN_USERNAMES}")
+logger.info(f"Путь к БД: {DATABASE_PATH}")
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# ... остальной код БЕЗ ИЗМЕНЕНИЙ ...
 
 class AdminStates(StatesGroup):
     select_category = State()
@@ -620,4 +624,5 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+
     asyncio.run(main())

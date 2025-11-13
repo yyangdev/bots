@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import sqlite3
@@ -13,22 +14,17 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-# [RENDER] Импортируем RedisStorage и redis
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio.client import Redis
 
 # --- [RENDER] Конфигурация из переменных окружения ---
-# ВАЖНО: Никогда не храните токен в коде!
 TOKEN = os.getenv("BOT_TOKEN")
-# Преобразуем строку из переменных окружения в список
 ADMIN_USERNAMES = os.getenv("ADMIN_USERNAMES", "yesbeers,yyangpython").split(',')
 MANAGER_CONTACT = os.getenv("MANAGER_CONTACT", "@managersrich")
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@eweton")
 REFERRAL_BONUS = float(os.getenv("REFERRAL_BONUS", 0.2))
 
 # [RENDER] Путь к базе данных на персистентном диске Render
-# Render монтирует диск в /var/data/, поэтому мы будем хранить БД там.
-# Если переменная окружения DATA_DIR не установлена (локальный запуск), используем текущую папку.
 DATA_DIR = Path(os.getenv("DATA_DIR", "."))
 DATABASE_PATH = DATA_DIR / "shop_bot.db"
 
@@ -51,76 +47,57 @@ if not REDIS_URL:
     logger.critical("Не найден REDIS_URL! FSM не будет работать корректно. Завершение работы.")
     exit()
 
-
 # --- Инициализация бота и диспетчера ---
-# [RENDER] Используем RedisStorage вместо MemoryStorage
 redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 storage = RedisStorage(redis=redis_client)
-
-bot = Bot(token=TOKEN)
+bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher(storage=storage)
 
-
-# --- Классы и функции (остаются без изменений, кроме пути к БД) ---
-
+# --- Состояния FSM ---
 class AdminStates(StatesGroup):
     select_category = State()
     select_item = State()
     enter_new_price = State()
     enter_new_name = State()
 
+# --- Класс для работы с БД ---
 class Database:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        # [RENDER] Убедимся, что папка для БД существует
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def get_connection(self):
-        # check_same_thread=False важно для асинхронного окружения
         return sqlite3.connect(self.db_path, check_same_thread=False)
 
     def init_db(self):
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS users (
-                        user_id INTEGER PRIMARY KEY,
-                        username TEXT,
-                        first_name TEXT,
-                        last_name TEXT,
-                        balance REAL DEFAULT 0,
-                        referral_code TEXT UNIQUE,
-                        referrer_id INTEGER,
+                        user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_name TEXT,
+                        balance REAL DEFAULT 0, referral_code TEXT UNIQUE, referrer_id INTEGER,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS categories (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT UNIQUE NOT NULL,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS items (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        category_id INTEGER,
-                        name TEXT NOT NULL,
-                        price INTEGER DEFAULT 0,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER, name TEXT NOT NULL,
+                        price INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (category_id) REFERENCES categories (id)
                     )
                 ''')
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS referrals (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        referrer_id INTEGER,
-                        referred_id INTEGER,
-                        bonus_paid BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referred_id INTEGER,
+                        bonus_paid BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(referred_id)
                     )
                 ''')
@@ -163,7 +140,6 @@ class Database:
                             )
                 conn.commit()
                 logger.info("База данных успешно инициализирована или уже существует.")
-                
         except Exception as e:
             logger.error(f"Ошибка инициализации базы данных: {e}", exc_info=True)
 
@@ -180,62 +156,38 @@ class Database:
                         'INSERT INTO users (user_id, username, first_name, last_name, referral_code, referrer_id) VALUES (?, ?, ?, ?, ?, ?)',
                         (user_id, username, first_name, last_name, referral_code, referrer_id)
                     )
-                    conn.commit()
                     logger.info(f"Добавлен новый пользователь: {user_id} {username}")
-                    
                     if referrer_id:
                         logger.info(f"Пользователь {user_id} пришел по приглашению от {referrer_id}. Начисляем бонус.")
-                        self._add_referral_bonus(referrer_id, user_id, conn) # Передаем соединение
+                        self._add_referral_bonus(referrer_id, user_id, conn)
                 else:
                     cursor.execute(
                         'UPDATE users SET username = ?, first_name = ?, last_name = ? WHERE user_id = ?',
                         (username, first_name, last_name, user_id)
                     )
-                    conn.commit()
                     logger.info(f"Обновлен существующий пользователь: {user_id}")
-                    
+                conn.commit()
         except Exception as e:
             logger.error(f"Ошибка добавления пользователя {user_id}: {e}", exc_info=True)
 
-    # [RENDER] Небольшая оптимизация, чтобы не открывать новое соединение внутри другого
     def _add_referral_bonus(self, referrer_id: int, referred_id: int, conn: sqlite3.Connection):
         try:
             cursor = conn.cursor()
-            
             cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (referrer_id,))
-            referrer_exists = cursor.fetchone()
-            
-            if not referrer_exists:
+            if not cursor.fetchone():
                 logger.error(f"Реферер {referrer_id} не найден в базе")
                 return
-                
             cursor.execute('SELECT id FROM referrals WHERE referred_id = ?', (referred_id,))
-            existing_referral = cursor.fetchone()
-            
-            if existing_referral:
+            if cursor.fetchone():
                 logger.info(f"Бонус для {referred_id} уже был начислен ранее.")
                 return
-                
-            cursor.execute(
-                'INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)',
-                (referrer_id, referred_id)
-            )
-            
-            cursor.execute(
-                'UPDATE users SET balance = balance + ? WHERE user_id = ?',
-                (REFERRAL_BONUS, referrer_id)
-            )
-            
+            cursor.execute('INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)', (referrer_id, referred_id))
+            cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', (REFERRAL_BONUS, referrer_id))
             logger.info(f"Бонус {REFERRAL_BONUS} руб. начислен пользователю {referrer_id} за приглашение {referred_id}")
-            # conn.commit() будет вызван в родительской функции add_user
-            
         except Exception as e:
             logger.error(f"Ошибка при начислении реферального бонуса: {e}", exc_info=True)
-            conn.rollback() # Откатываем изменения в случае ошибки
-    
-    # ... Остальные методы класса Database остаются без изменений ...
-    # (get_user_balance, get_referral_code, get_referral_stats, etc.)
-    # Я их удалил для краткости, но в вашем файле они должны остаться.
+            conn.rollback()
+
     def get_user_balance(self, user_id: int) -> float:
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -257,23 +209,13 @@ class Database:
             total_referrals = cursor.fetchone()[0]
             total_earned = total_referrals * REFERRAL_BONUS
             return total_referrals, total_earned
-
-    def get_all_users(self) -> List[int]:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM users')
-            users = [row[0] for row in cursor.fetchall()]
-            logger.info(f"Найдено пользователей в базе: {len(users)}")
-            return users
-
+            
     def get_users_count(self) -> int:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM users')
-                result = cursor.fetchone()
-                count = result[0] if result else 0
-                return count
+                return cursor.fetchone()[0] or 0
         except Exception as e:
             logger.error(f"Ошибка получения количества пользователей: {e}")
             return 0
@@ -289,12 +231,6 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('SELECT id, name, price FROM items WHERE category_id = ? ORDER BY name', (category_id,))
             return cursor.fetchall()
-
-    def get_category_by_name(self, category_name: str) -> tuple:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, name FROM categories WHERE name = ?', (category_name,))
-            return cursor.fetchone()
 
     def get_item_by_id(self, item_id: int) -> tuple:
         with self.get_connection() as conn:
@@ -313,83 +249,89 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('UPDATE items SET name = ? WHERE id = ?', (new_name, item_id))
             conn.commit()
+    
+    # [ДОБАВЛЕНО] Другие методы для работы с БД, если они понадобятся
+    def get_category_by_name(self, category_name: str) -> tuple:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, name FROM categories WHERE name = ?', (category_name,))
+            return cursor.fetchone()
 
-# Создаем экземпляр базы данных
+
 db = Database(DATABASE_PATH)
 
-# --- Весь остальной код обработчиков остается без изменений ---
-# ... (check_subscription, is_admin, все get_*_keyboard, хендлеры сообщений и команд) ...
-# Я также удалил их для краткости, в вашем файле они должны быть.
+# --- Вспомогательные функции ---
 async def check_subscription(user_id: int) -> bool:
+    if not REQUIRED_CHANNEL or REQUIRED_CHANNEL == "@": return True
     try:
-        # Если канал не указан, считаем, что подписка не нужна
-        if not REQUIRED_CHANNEL or REQUIRED_CHANNEL == "@":
-            return True
         chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         return chat_member.status in ['member', 'administrator', 'creator']
-    except Exception:
-        # Если бот не может проверить (например, не админ в канале), разрешаем доступ
-        logger.warning(f"Не удалось проверить подписку для {user_id} на канал {REQUIRED_CHANNEL}. Доступ разрешен.")
+    except Exception as e:
+        logger.warning(f"Не удалось проверить подписку для {user_id} на {REQUIRED_CHANNEL}: {e}. Доступ разрешен.")
         return True
 
 def is_admin(username: str) -> bool:
-    if not username:
-        return False
-    clean_username = username.lstrip('@')
-    return clean_username in ADMIN_USERNAMES
+    if not username: return False
+    return username.lstrip('@') in ADMIN_USERNAMES
 
+# --- [ДОБАВЛЕНО] Восстановленные функции клавиатур ---
 def get_main_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Каталог")],
-            [KeyboardButton(text="Реферальная система"), KeyboardButton(text="Баланс")],
-            [KeyboardButton(text="Помощь"), KeyboardButton(text="Контакты")]
-        ],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="Каталог")],
+        [KeyboardButton(text="Реферальная система"), KeyboardButton(text="Баланс")],
+        [KeyboardButton(text="Помощь"), KeyboardButton(text="Контакты")]
+    ], resize_keyboard=True)
 
 def get_catalog_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="GTA 5 RP"), KeyboardButton(text="Standoff 2")],
-            [KeyboardButton(text="Brawl Stars"), KeyboardButton(text="Clash Royale")],
-            [KeyboardButton(text="Roblox"), KeyboardButton(text="CS 2")],
-            [KeyboardButton(text="Pubg Mobile"), KeyboardButton(text="PUBG (PC/Console)")],
-            [KeyboardButton(text="Discord"), KeyboardButton(text="YouTube")],
-            [KeyboardButton(text="TikTok"), KeyboardButton(text="Telegram")],
-            [KeyboardButton(text="NFT Подарки"), KeyboardButton(text="Назад")]
-        ],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="GTA 5 RP"), KeyboardButton(text="Standoff 2")],
+        [KeyboardButton(text="Brawl Stars"), KeyboardButton(text="Clash Royale")],
+        [KeyboardButton(text="Roblox"), KeyboardButton(text="CS 2")],
+        [KeyboardButton(text="Pubg Mobile"), KeyboardButton(text="PUBG (PC/Console)")],
+        [KeyboardButton(text="Discord"), KeyboardButton(text="YouTube")],
+        [KeyboardButton(text="TikTok"), KeyboardButton(text="Telegram")],
+        [KeyboardButton(text="NFT Подарки"), KeyboardButton(text="Назад")]
+    ], resize_keyboard=True)
 
-# ... (и так далее, все ваши функции клавиатур)
 def get_back_keyboard():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Назад")]], resize_keyboard=True)
 
+def get_items_keyboard(category_name: str):
+    category = db.get_category_by_name(category_name)
+    if not category: return get_back_keyboard()
+    items = db.get_items_by_category(category[0])
+    builder = ReplyKeyboardBuilder()
+    for _, item_name, _ in items:
+        builder.add(KeyboardButton(text=item_name))
+    builder.adjust(2)
+    builder.row(KeyboardButton(text="Назад"))
+    return builder.as_markup(resize_keyboard=True)
+
 def get_telegram_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="21 звезда"), KeyboardButton(text="50 звезд")],
-            [KeyboardButton(text="100 звезд")],
-            [KeyboardButton(text="Premium 1 месяц"), KeyboardButton(text="Premium 3 месяца")],
-            [KeyboardButton(text="Premium 6 месяцев"), KeyboardButton(text="Premium 12 месяцев")],
-            [KeyboardButton(text="Назад")]
-        ],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="21 звезда"), KeyboardButton(text="50 звезд"), KeyboardButton(text="100 звезд")],
+        [KeyboardButton(text="Premium 1 месяц"), KeyboardButton(text="Premium 3 месяца")],
+        [KeyboardButton(text="Premium 6 месяцев"), KeyboardButton(text="Premium 12 месяцев")],
+        [KeyboardButton(text="Назад")]
+    ], resize_keyboard=True)
 
-# ... (все хендлеры, я их пропущу)
-
+def get_standoff_keyboard():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="Голда"), KeyboardButton(text="Аккаунт"), KeyboardButton(text="Донат")],
+        [KeyboardButton(text="Буст"), KeyboardButton(text="Кланы"), KeyboardButton(text="Софт")],
+        [KeyboardButton(text="Назад")]
+    ], resize_keyboard=True)
+    
+# --- Обработчики команд ---
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    # Проверяем подписку ДО добавления пользователя и начисления бонусов
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     if not await check_subscription(message.from_user.id):
         kb = InlineKeyboardBuilder()
         kb.add(InlineKeyboardButton(text="Подписаться", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"))
         kb.add(InlineKeyboardButton(text="Проверить", callback_data="check_sub"))
         await message.answer(
-            f"Для использования бота, пожалуйста, подпишитесь на наш канал. "
-            f"После подписки нажмите кнопку 'Проверить'.",
+            f"Для использования бота, пожалуйста, подпишитесь на наш канал. После подписки нажмите 'Проверить'.",
             reply_markup=kb.as_markup()
         )
         return
@@ -398,67 +340,205 @@ async def cmd_start(message: types.Message):
     args = message.text.split()
     if len(args) > 1:
         referral_code = args[1]
-        logger.info(f"Обнаружен реферальный код: {referral_code} от пользователя {message.from_user.id}")
-        
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (referral_code,))
             result = cursor.fetchone()
             if result and result[0] != message.from_user.id:
                 referrer_id = result[0]
-                logger.info(f"Реферал найден: {referrer_id} пригласил {message.from_user.id}")
-            else:
-                logger.warning(f"Реферальный код {referral_code} не найден или пользователь ссылается на себя.")
     
     db.add_user(
-        message.from_user.id,
-        message.from_user.username,
-        message.from_user.first_name,
-        message.from_user.last_name or "",
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name or "",
         referrer_id
     )
-    
     await message.answer("Добро пожаловать! Выберите действие:", reply_markup=get_main_keyboard())
 
-
 @dp.callback_query(F.data == "check_sub")
-async def handle_check_sub(callback: types.CallbackQuery):
+async def handle_check_sub(callback: types.CallbackQuery, state: FSMContext):
     if await check_subscription(callback.from_user.id):
-        await callback.message.delete() # Удаляем сообщение с кнопками подписки
-        await cmd_start(callback.message) # Запускаем логику /start заново
+        await callback.answer("Спасибо за подписку!", show_alert=False)
+        await callback.message.delete()
+        await cmd_start(callback.message, state)
     else:
         await callback.answer("Вы все еще не подписаны. Пожалуйста, подпишитесь и попробуйте снова.", show_alert=True)
 
+@dp.message(Command("info"))
+async def cmd_info(message: types.Message):
+    if not is_admin(message.from_user.username): return
+    await message.answer(f"Пользователей в боте: {db.get_users_count()}")
 
-# ... (все остальные хендлеры)
+@dp.message(Command("debug"))
+async def cmd_debug(message: types.Message):
+    if not is_admin(message.from_user.username): return
+    db_exists = DATABASE_PATH.exists()
+    db_size = DATABASE_PATH.stat().st_size if db_exists else 0
+    debug_info = (
+        f"<b>Отладка:</b>\n"
+        f"Файл БД: <code>{DATABASE_PATH}</code>\n"
+        f"Файл существует: <code>{db_exists}</code>\n"
+        f"Размер БД: <code>{db_size}</code> байт\n"
+        f"Всего пользователей: <code>{db.get_users_count()}</code>"
+    )
+    await message.answer(debug_info)
+
+# --- [ДОБАВЛЕНО] Обработчики админ-панели ---
+@dp.message(Command("admin"))
+async def cmd_admin(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.username):
+        return await message.answer("Нет прав доступа.")
+    
+    builder = InlineKeyboardBuilder()
+    for cat_id, cat_name in db.get_categories():
+        builder.button(text=cat_name, callback_data=f"admin_cat_{cat_id}")
+    builder.adjust(2)
+    await message.answer("Админ-панель. Выберите категорию для редактирования:", reply_markup=builder.as_markup())
+    await state.set_state(AdminStates.select_category)
+
+@dp.callback_query(AdminStates.select_category, F.data.startswith("admin_cat_"))
+async def admin_select_category(callback: types.CallbackQuery, state: FSMContext):
+    category_id = int(callback.data.split("_")[2])
+    await state.update_data(category_id=category_id)
+    
+    builder = InlineKeyboardBuilder()
+    items = db.get_items_by_category(category_id)
+    if not items:
+        await callback.answer("В этой категории нет товаров.", show_alert=True)
+        return
+
+    for item_id, item_name, item_price in items:
+        builder.button(text=f"{item_name} ({item_price} руб.)", callback_data=f"admin_item_{item_id}")
+    builder.adjust(1)
+    await callback.message.edit_text("Выберите товар для редактирования:", reply_markup=builder.as_markup())
+    await state.set_state(AdminStates.select_item)
+
+@dp.callback_query(AdminStates.select_item, F.data.startswith("admin_item_"))
+async def admin_select_item(callback: types.CallbackQuery, state: FSMContext):
+    item_id = int(callback.data.split("_")[2])
+    await state.update_data(item_id=item_id)
+    item = db.get_item_by_id(item_id)
+    if not item:
+        await callback.answer("Товар не найден!", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Изменить цену", callback_data="admin_edit_price")
+    builder.button(text="Изменить название", callback_data="admin_edit_name")
+    builder.button(text="<< Назад", callback_data="admin_back_to_cats")
+    await callback.message.edit_text(f"Выбран товар: <b>{item[1]}</b>\nТекущая цена: <b>{item[2]} руб.</b>\n\nЧто вы хотите сделать?", reply_markup=builder.as_markup())
+
+@dp.callback_query(AdminStates.select_item, F.data == "admin_edit_price")
+async def admin_prompt_price(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Введите новую цену для товара (только цифры):")
+    await state.set_state(AdminStates.enter_new_price)
+
+@dp.message(AdminStates.enter_new_price)
+async def admin_update_price(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("Ошибка. Введите только цифры. Попробуйте еще раз.")
+    
+    data = await state.get_data()
+    item_id = data.get("item_id")
+    new_price = int(message.text)
+    
+    db.update_item_price(item_id, new_price)
+    await message.answer(f"Цена товара успешно обновлена на <b>{new_price} руб.</b>")
+    await state.clear()
+    await cmd_admin(message, state) # Возвращаемся в начало админки
+
+@dp.callback_query(AdminStates.select_item, F.data == "admin_back_to_cats")
+async def admin_back_to_categories(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cmd_admin(callback.message, state)
+
+
+# --- Обработчики основного меню ---
 @dp.message(F.text == "Каталог")
 async def show_catalog(message: types.Message):
-    if not await check_subscription(message.from_user.id):
-        await message.answer("Проверьте подписку!", reply_markup=get_main_keyboard())
-        return
     await message.answer("Выберите категорию:", reply_markup=get_catalog_keyboard())
 
-# ... и так далее. Оставляем все ваши хендлеры как есть.
-# Я их пропустил, чтобы не дублировать 500 строк кода.
-# Просто скопируйте их сюда из вашего оригинального файла.
+@dp.message(F.text == "Баланс")
+@dp.message(Command("balance"))
+async def cmd_balance(message: types.Message):
+    balance = db.get_user_balance(message.from_user.id)
+    referrals_count, total_earned = db.get_referral_stats(message.from_user.id)
+    balance_text = (
+        f"<b>Ваш баланс:</b> {balance:.2f} руб.\n\n"
+        f"<b>Статистика рефералов:</b>\n"
+        f"Приглашено: {referrals_count} чел.\n"
+        f"Заработано: {total_earned:.2f} руб.\n\n"
+        f"Для вывода средств свяжитесь с менеджером: {MANAGER_CONTACT}"
+    )
+    await message.answer(balance_text, reply_markup=get_main_keyboard())
+
+@dp.message(F.text == "Реферальная система")
+async def show_referral(message: types.Message):
+    referral_code = db.get_referral_code(message.from_user.id)
+    bot_info = await bot.get_me()
+    referral_link = f"https://t.me/{bot_info.username}?start={referral_code}"
+    _, total_earned = db.get_referral_stats(message.from_user.id)
+    
+    referral_text = (
+        f"<b>Приглашайте друзей и зарабатывайте!</b>\n\n"
+        f"Вы получите <b>{REFERRAL_BONUS:.2f} руб.</b> за каждого друга, который запустит бота по вашей ссылке.\n\n"
+        f"Ваша персональная ссылка:\n<code>{referral_link}</code>\n\n"
+        f"Всего заработано: <b>{total_earned:.2f} руб.</b>"
+    )
+    await message.answer(referral_text, disable_web_page_preview=True)
+
+@dp.message(F.text == "Помощь")
+async def show_help(message: types.Message):
+    await message.answer(f"По всем вопросам обращайтесь к менеджеру: {MANAGER_CONTACT}")
+
+@dp.message(F.text == "Контакты")
+async def show_contacts(message: types.Message):
+    await message.answer(f"Наш менеджер: {MANAGER_CONTACT}\nВремя ответа: 5-15 минут.")
+
 @dp.message(F.text == "Назад")
-async def back_to_main(message: types.Message):
+async def back_to_main(message: types.Message, state: FSMContext):
+    await state.clear()
     await message.answer("Главное меню:", reply_markup=get_main_keyboard())
+
+
+# --- Обработчики категорий и товаров ---
+@dp.message(F.text.in_([
+    "GTA 5 RP", "Brawl Stars", "Clash Royale", "Roblox", "CS 2", 
+    "Pubg Mobile", "PUBG (PC/Console)", "Discord", "YouTube", "TikTok"
+]))
+async def show_generic_category(message: types.Message):
+    # Универсальный обработчик для категорий с товарами из БД
+    await message.answer(f"Товары в категории «{message.text}»:", reply_markup=get_items_keyboard(message.text))
+
+@dp.message(F.text == "Standoff 2")
+async def show_standoff_category(message: types.Message):
+    await message.answer("Товары в категории «Standoff 2»:", reply_markup=get_standoff_keyboard())
+
+@dp.message(F.text == "Telegram")
+async def show_telegram_category(message: types.Message):
+    await message.answer("Товары в категории «Telegram»:", reply_markup=get_telegram_keyboard())
+
+@dp.message(F.text == "NFT Подарки")
+async def show_nft_category(message: types.Message):
+    await message.answer(f"Для заказа NFT Подарков и просмотра ассортимента напишите менеджеру: {MANAGER_CONTACT}", reply_markup=get_back_keyboard())
+
+# [ДОБАВЛЕНО] Обработчики для конкретных товаров (пример)
+# Для товаров, которых нет в БД или с особой логикой
+@dp.message(F.text.in_([
+    "21 звезда", "50 звезд", "100 звезд", "Premium 1 месяц", "Premium 3 месяца", 
+    "Premium 6 месяцев", "Premium 12 месяцев", "Голда", "Аккаунт", "Донат", "Буст", "Кланы", "Софт"
+]))
+async def handle_generic_item(message: types.Message):
+    item_name = message.text
+    # Здесь можно добавить логику цен из словаря или БД, если нужно
+    # Для простоты, все отправляем к менеджеру
+    order_text = f"Вы выбрали: <b>{item_name}</b>\n\nДля уточнения цены и оформления заказа, пожалуйста, напишите нашему менеджеру: {MANAGER_CONTACT}"
+    await message.answer(order_text, reply_markup=get_back_keyboard())
 
 # --- Основная функция запуска ---
 async def main():
     logger.info("Бот запускается...")
-    # Убедимся, что папка для данных существует, если мы на Render
-    if 'RENDER' in os.environ:
-        DATA_DIR.mkdir(exist_ok=True)
-
-    users_count = db.get_users_count()
-    logger.info(f"Пользователей в базе при запуске: {users_count}")
-    
-    # Удаляем вебхук, если он был установлен ранее
     await bot.delete_webhook(drop_pending_updates=True)
-    # Запускаем поллинг
-    await dp.start_polling(bot)
-
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__":
+    asyncio.run(main())

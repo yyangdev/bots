@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: telegram-shop-bot
+    env: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8366606577:AAFHCashI_usjf1Xowif_flbF7bWaXWerVU
+      - key: ADMIN_USERNAMES
+        value: yesbeers,yyangpython
+      - key: MANAGER_CONTACT
+        value: "@managersrich"
+      - key: REQUIRED_CHANNEL
+        value: "@eweton"

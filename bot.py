@@ -43,7 +43,9 @@ if not TOKEN:
     exit()
 
 # --- Инициализация бота и диспетчера ---
-bot = Bot(token=TOKEN, parse_mode="HTML")
+from aiogram.client.default import DefaultBotProperties
+
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=storage)  # ИСПРАВЛЕНО: используем MemoryStorage
 
 # --- Состояния FSM ---
@@ -527,3 +529,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

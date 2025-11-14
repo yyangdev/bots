@@ -13,10 +13,10 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.memory import MemoryStorage  # ИСПРАВЛЕНО: только MemoryStorage
 
 # Инициализация хранилища
-storage = MemoryStorage()
+storage = MemoryStorage()  # ИСПРАВЛЕНО
 
 # --- [RENDER] Конфигурация из переменных окружения ---
 TOKEN = os.getenv("BOT_TOKEN")
@@ -44,7 +44,7 @@ if not TOKEN:
 
 # --- Инициализация бота и диспетчера ---
 bot = Bot(token=TOKEN, parse_mode="HTML")
-dp = Dispatcher(storage=storage)  # Используем MemoryStorage
+dp = Dispatcher(storage=storage)  # ИСПРАВЛЕНО: используем MemoryStorage
 
 # --- Состояния FSM ---
 class AdminStates(StatesGroup):
@@ -74,9 +74,6 @@ class Database:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                # ... остальной код инициализации БД без изменений ...
-                
-# Остальной код остается без изменений...
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS categories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
@@ -246,7 +243,6 @@ class Database:
             cursor.execute('UPDATE items SET name = ? WHERE id = ?', (new_name, item_id))
             conn.commit()
     
-    # [ДОБАВЛЕНО] Другие методы для работы с БД, если они понадобятся
     def get_category_by_name(self, category_name: str) -> tuple:
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -270,7 +266,7 @@ def is_admin(username: str) -> bool:
     if not username: return False
     return username.lstrip('@') in ADMIN_USERNAMES
 
-# --- [ДОБАВЛЕНО] Восстановленные функции клавиатур ---
+# --- Клавиатуры ---
 def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="Каталог")],
@@ -378,7 +374,7 @@ async def cmd_debug(message: types.Message):
     )
     await message.answer(debug_info)
 
-# --- [ДОБАВЛЕНО] Обработчики админ-панели ---
+# --- Обработчики админ-панели ---
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.username):
@@ -440,13 +436,12 @@ async def admin_update_price(message: types.Message, state: FSMContext):
     db.update_item_price(item_id, new_price)
     await message.answer(f"Цена товара успешно обновлена на <b>{new_price} руб.</b>")
     await state.clear()
-    await cmd_admin(message, state) # Возвращаемся в начало админки
+    await cmd_admin(message, state)
 
 @dp.callback_query(AdminStates.select_item, F.data == "admin_back_to_cats")
 async def admin_back_to_categories(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await cmd_admin(callback.message, state)
-
 
 # --- Обработчики основного меню ---
 @dp.message(F.text == "Каталог")
@@ -495,14 +490,12 @@ async def back_to_main(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Главное меню:", reply_markup=get_main_keyboard())
 
-
 # --- Обработчики категорий и товаров ---
 @dp.message(F.text.in_([
     "GTA 5 RP", "Brawl Stars", "Clash Royale", "Roblox", "CS 2", 
     "Pubg Mobile", "PUBG (PC/Console)", "Discord", "YouTube", "TikTok"
 ]))
 async def show_generic_category(message: types.Message):
-    # Универсальный обработчик для категорий с товарами из БД
     await message.answer(f"Товары в категории «{message.text}»:", reply_markup=get_items_keyboard(message.text))
 
 @dp.message(F.text == "Standoff 2")
@@ -517,16 +510,12 @@ async def show_telegram_category(message: types.Message):
 async def show_nft_category(message: types.Message):
     await message.answer(f"Для заказа NFT Подарков и просмотра ассортимента напишите менеджеру: {MANAGER_CONTACT}", reply_markup=get_back_keyboard())
 
-# [ДОБАВЛЕНО] Обработчики для конкретных товаров (пример)
-# Для товаров, которых нет в БД или с особой логикой
 @dp.message(F.text.in_([
     "21 звезда", "50 звезд", "100 звезд", "Premium 1 месяц", "Premium 3 месяца", 
     "Premium 6 месяцев", "Premium 12 месяцев", "Голда", "Аккаунт", "Донат", "Буст", "Кланы", "Софт"
 ]))
 async def handle_generic_item(message: types.Message):
     item_name = message.text
-    # Здесь можно добавить логику цен из словаря или БД, если нужно
-    # Для простоты, все отправляем к менеджеру
     order_text = f"Вы выбрали: <b>{item_name}</b>\n\nДля уточнения цены и оформления заказа, пожалуйста, напишите нашему менеджеру: {MANAGER_CONTACT}"
     await message.answer(order_text, reply_markup=get_back_keyboard())
 
@@ -538,5 +527,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-

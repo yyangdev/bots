@@ -13,13 +13,10 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage  # ИЗМЕНЕНО ЗДЕСЬ
-# from redis.asyncio.client import Redis  # УДАЛИТЬ ЭТУ СТРОКУ
+from aiogram.fsm.storage.memory import MemoryStorage
 
 # Инициализация хранилища
-storage = MemoryStorage()  # ИЗМЕНЕНО ЗДЕСЬ
-
-# Остальной код бота...
+storage = MemoryStorage()
 
 # --- [RENDER] Конфигурация из переменных окружения ---
 TOKEN = os.getenv("BOT_TOKEN")
@@ -31,9 +28,6 @@ REFERRAL_BONUS = float(os.getenv("REFERRAL_BONUS", 0.2))
 # [RENDER] Путь к базе данных на персистентном диске Render
 DATA_DIR = Path(os.getenv("DATA_DIR", "."))
 DATABASE_PATH = DATA_DIR / "shop_bot.db"
-
-# [RENDER] URL для подключения к Redis из переменных окружения
-REDIS_URL = os.getenv("REDIS_URL")
 
 # --- Настройка логирования ---
 logging.basicConfig(
@@ -47,15 +41,10 @@ logger.info(f"Администраторы: {ADMIN_USERNAMES}")
 if not TOKEN:
     logger.critical("Не найден BOT_TOKEN! Завершение работы.")
     exit()
-if not REDIS_URL:
-    logger.critical("Не найден REDIS_URL! FSM не будет работать корректно. Завершение работы.")
-    exit()
 
 # --- Инициализация бота и диспетчера ---
-redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
-storage = RedisStorage(redis=redis_client)
 bot = Bot(token=TOKEN, parse_mode="HTML")
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(storage=storage)  # Используем MemoryStorage
 
 # --- Состояния FSM ---
 class AdminStates(StatesGroup):
@@ -85,6 +74,9 @@ class Database:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                # ... остальной код инициализации БД без изменений ...
+                
+# Остальной код остается без изменений...
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS categories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
@@ -546,4 +538,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 

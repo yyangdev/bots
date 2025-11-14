@@ -22,7 +22,7 @@ TOKEN = os.getenv('BOT_TOKEN', '8366606577:AAFHCashI_usjf1Xowif_flbF7bWaXWerVU')
 ADMIN_USERNAMES = ["yesbeers"]  # 🛡️ Только один администратор
 MANAGER_CONTACT = "@managersrich"
 REQUIRED_CHANNEL = "@eweton"
-REFERRAL_BONUS = 0.5  # 💰 0.5 руб за каждого приглашенного
+REFERRAL_BONUS = 1  # 💰 0.5 руб за каждого приглашенного
 BROADCAST_TIME = dt_time(13, 0)  # 🕐 Время рассылки: 13:00
 
 # ==================== 💰 ЦЕНЫ НА ТОВАРЫ ====================
@@ -1106,3 +1106,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

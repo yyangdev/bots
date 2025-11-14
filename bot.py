@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 import sqlite3
@@ -14,8 +13,13 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.redis import RedisStorage
-from redis.asyncio.client import Redis
+from aiogram.fsm.storage.memory import MemoryStorage  # ИЗМЕНЕНО ЗДЕСЬ
+# from redis.asyncio.client import Redis  # УДАЛИТЬ ЭТУ СТРОКУ
+
+# Инициализация хранилища
+storage = MemoryStorage()  # ИЗМЕНЕНО ЗДЕСЬ
+
+# Остальной код бота...
 
 # --- [RENDER] Конфигурация из переменных окружения ---
 TOKEN = os.getenv("BOT_TOKEN")
@@ -542,3 +546,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
